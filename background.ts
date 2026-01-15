@@ -1,36 +1,4 @@
 
-chrome.commands.onCommand.addListener(async function(command) {
-  console.log('command:', command);
-
-  const currentTab = await getCurrentTab();
-  if (!currentTab) {
-    console.error('No active tab found');
-    return;
-  }
-
-  const selectedText = await getSelectedText(currentTab);
-  if (!selectedText) {
-    console.error('No selected text found');
-    return;
-  }
-
-  await chrome.search.query({
-    text: selectedText,
-    disposition: 'NEW_TAB',
-  });
-});
-
-async function getCurrentTab(): Promise<chrome.tabs.Tab | undefined> {
-  const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-
-  if (tabs.length === 0) {
-    console.error('No active tab found');
-    return undefined;
-  }
-
-  return tabs[0];
-}
-
 async function getSelectedText(tab: chrome.tabs.Tab): Promise<string | undefined> {
   if (!tab) {
     console.error('Param tab is undefined');
@@ -42,8 +10,7 @@ async function getSelectedText(tab: chrome.tabs.Tab): Promise<string | undefined
     target: { tabId: tab.id!, allFrames: false },
     func: function() {
       const selectedText = window.getSelection?.() ?? document.getSelection?.() ?? '';
-      const cleanedSelectedText = String(selectedText).replace(/\r?\n|\r/g, ' '); // Replace line breaks with spaces
-      return encodeURIComponent(cleanedSelectedText);
+      return encodeURIComponent(selectedText as string);
     }
   });
 
@@ -52,23 +19,45 @@ async function getSelectedText(tab: chrome.tabs.Tab): Promise<string | undefined
     return undefined;
   }
 
-  const searchTextEncoded = results[0].result;
+  const selectedTextEncoded = results[0]?.result;
 
-  if (!searchTextEncoded) {
-    console.error('[InvalidResult] executeScript() returns:', searchTextEncoded);
+  if (!selectedTextEncoded) {
+    console.error('[InvalidResult] executeScript() returns:', selectedTextEncoded);
     return undefined;
   }
 
-  console.log('[Success] executeScript() returns encoded', `"${searchTextEncoded}"`);
+  const selectedText = decodeURIComponent(selectedTextEncoded);
 
-  const searchText = decodeURIComponent(searchTextEncoded);
-
-  if (!searchText){
-    console.error('[InvalidResult] decodeURIComponent() returns:', searchText);
-    return undefined;
-  }
-
-  console.log('[Success] decodeURIComponent() returns:', searchText);
-
-  return searchText;
+  return selectedText;
 }
+
+chrome.commands.onCommand.addListener(async function(command) {
+  console.log('command:', command);
+
+  const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!currentTab) {
+    console.error('No active tab found');
+    return;
+  }
+
+  const selectedText = await getSelectedText(currentTab);
+  if (!selectedText) {
+    console.error('No selected text found');
+    return;
+  }
+
+  // Open empty tab, run search and only then focus on it.
+  // This way there is no flicker and focus ends up being on the page and not the omnibox.
+  const newTab = await chrome.tabs.create({
+    index: currentTab.index + 1,
+    active: false,
+  });
+
+  await chrome.search.query({
+    tabId: newTab.id!,
+    text: selectedText,
+  });
+
+  await chrome.tabs.update(newTab.id!, { active: true });
+});
+
