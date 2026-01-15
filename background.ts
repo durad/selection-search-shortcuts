@@ -58,6 +58,6 @@ chrome.commands.onCommand.addListener(async function(command) {
     text: selectedText,
   });
 
-  await chrome.tabs.update(newTab.id!, { active: true });
+  await chrome.tabs.update(newTab.id!, { openerTabId: currentTab.id!, active: true });
 });
 
